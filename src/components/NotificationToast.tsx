@@ -43,7 +43,7 @@ export const NotificationToast: React.FC<NotificationToastProps> = ({
               }}
               className="mt-2 inline-flex items-center space-x-1 text-xs text-emerald-400 hover:text-emerald-300 font-semibold"
             >
-              <span>Buka di Panel Admin</span>
+              <span>Buka di Admin</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>

@@ -1,0 +1,146 @@
+{
+  "entities": {
+    "orders": {
+      "title": "Order",
+      "description": "Customer shoe cleaning orders",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique Order ID" },
+        "createdAt": { "type": "string", "description": "ISO timestamp of order creation" },
+        "customerName": { "type": "string", "description": "Customer full name" },
+        "customerPhone": { "type": "string", "description": "Customer WhatsApp phone number" },
+        "deliveryMethod": { "type": "string", "description": "Delivery method" },
+        "pickupAddress": { "type": "string", "description": "Pickup address" },
+        "pickupNotes": { "type": "string", "description": "Pickup landmark or notes" },
+        "serviceId": { "type": "string", "description": "ID of service tier" },
+        "serviceName": { "type": "string", "description": "Name of service tier" },
+        "servicePrice": { "type": "number", "description": "Price per pair" },
+        "pairCount": { "type": "number", "description": "Number of shoe pairs" },
+        "shoeDetails": { "type": "array", "description": "Details of each shoe" },
+        "selectedAddOns": { "type": "array", "description": "Selected add-on IDs" },
+        "addOnsTotal": { "type": "number", "description": "Total cost of add-ons" },
+        "deliveryFee": { "type": "number", "description": "Delivery fee" },
+        "totalPrice": { "type": "number", "description": "Grand total price" },
+        "status": { "type": "string", "description": "Current processing status" },
+        "paymentStatus": { "type": "string", "description": "Payment status" },
+        "statusHistory": { "type": "array", "description": "Log of status changes" },
+        "adminNotes": { "type": "string", "description": "Internal admin notes" },
+        "isReadByAdmin": { "type": "boolean", "description": "Whether admin has reviewed order" }
+      },
+      "required": ["id", "customerName", "customerPhone", "serviceName", "totalPrice", "status"]
+    },
+    "notifications": {
+      "title": "Notification",
+      "description": "Admin notifications for new orders and updates",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "orderId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "serviceName": { "type": "string" },
+        "totalPrice": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "isRead": { "type": "boolean" },
+        "message": { "type": "string" }
+      },
+      "required": ["id", "orderId", "message"]
+    },
+    "settings": {
+      "title": "Store Settings",
+      "description": "Global store configuration and contact info",
+      "type": "object",
+      "properties": {
+        "adminPhone": { "type": "string" },
+        "storeName": { "type": "string" },
+        "storeAddress": { "type": "string" },
+        "autoSoundEnabled": { "type": "boolean" },
+        "pickupFee": { "type": "number" }
+      }
+    },
+    "expenses": {
+      "title": "Expense",
+      "description": "Store operational expenses and capital expenditure (belanja modal)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "title": { "type": "string" },
+        "category": { "type": "string" },
+        "amount": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "date", "title", "category", "amount"]
+    },
+    "capital": {
+      "title": "Initial Capital",
+      "description": "Store initial capital and owner equity investments",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "title": { "type": "string" },
+        "source": { "type": "string" },
+        "amount": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "recipientOrBank": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "date", "title", "source", "amount"]
+    },
+    "promos": {
+      "title": "Holiday Promo",
+      "description": "Store holiday discounts, promos, and HUT RI campaigns",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "category": { "type": "string" },
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "discountType": { "type": "string" },
+        "discountValue": { "type": "number" },
+        "maxDiscount": { "type": "number" },
+        "minOrderAmount": { "type": "number" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "bannerText": { "type": "string" },
+        "description": { "type": "string" },
+        "targetServiceId": { "type": "string" },
+        "usageCount": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "code", "discountType", "discountValue", "isActive"]
+    }
+  },
+  "firestore": {
+    "orders": {
+      "entity": "orders",
+      "description": "Collection of all shoe cleaning orders"
+    },
+    "notifications": {
+      "entity": "notifications",
+      "description": "Collection of admin notifications"
+    },
+    "settings": {
+      "entity": "settings",
+      "description": "Global settings document"
+    },
+    "expenses": {
+      "entity": "expenses",
+      "description": "Collection of all expenses and capital expenditures"
+    },
+    "capital": {
+      "entity": "capital",
+      "description": "Collection of all initial capital and equity records"
+    },
+    "promos": {
+      "entity": "promos",
+      "description": "Collection of all holiday promotional campaigns and discount codes"
+    }
+  }
+}

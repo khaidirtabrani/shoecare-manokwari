@@ -1,4 +1,9 @@
-import { ServiceItem, AddOnItem } from '../types';
+import { ServiceItem, AddOnItem, AdminSettings } from '../types';
+
+import regulerImg from '../assets/images/service_reguler.png';
+import premiumImg from '../assets/images/service_premium.png';
+import expressImg from '../assets/images/service_express.png';
+import repaintImg from '../assets/images/service_repaint.png';
 
 export const SERVICES: ServiceItem[] = [
   {
@@ -21,7 +26,7 @@ export const SERVICES: ServiceItem[] = [
       border: 'border-blue-200 hover:border-blue-400',
       accent: 'text-blue-600'
     },
-    imageUrl: '/src/assets/images/service_reguler_anim_1788629485522.jpg'
+    imageUrl: regulerImg
   },
   {
     id: 'premium',
@@ -45,7 +50,7 @@ export const SERVICES: ServiceItem[] = [
       border: 'border-emerald-300 ring-1 ring-emerald-400/40',
       accent: 'text-emerald-600'
     },
-    imageUrl: '/src/assets/images/service_premium_anim_1788629502580.jpg'
+    imageUrl: premiumImg
   },
   {
     id: 'express',
@@ -68,7 +73,7 @@ export const SERVICES: ServiceItem[] = [
       border: 'border-amber-300 hover:border-amber-400',
       accent: 'text-amber-600'
     },
-    imageUrl: '/src/assets/images/service_express_anim_1788629526476.jpg'
+    imageUrl: expressImg
   },
   {
     id: 'repaint',
@@ -91,7 +96,7 @@ export const SERVICES: ServiceItem[] = [
       border: 'border-purple-300 hover:border-purple-400',
       accent: 'text-purple-600'
     },
-    imageUrl: '/src/assets/images/service_repaint_anim_1788629540268.jpg'
+    imageUrl: repaintImg
   }
 ];
 
@@ -101,6 +106,12 @@ export const ADD_ONS: AddOnItem[] = [
     name: 'Unyellowing Booster Sol',
     price: 20000,
     description: 'Menghilangkan warna kuning pada midsole & outsole karet yang teroksidasi'
+  },
+  {
+    id: 'suede_care',
+    name: 'Suede Restoration & Color Reviving',
+    price: 30000,
+    description: 'Pemulihan serat bulu suede/nubuck yang kaku/rusak agar lembut alami & formula color reviver untuk mengembalikan warna pudar'
   },
   {
     id: 'nano_waterproof',
@@ -122,6 +133,22 @@ export const ADD_ONS: AddOnItem[] = [
   }
 ];
 
+export const getServices = (settings?: AdminSettings): ServiceItem[] => {
+  if (!settings?.servicePrices) return SERVICES;
+  return SERVICES.map(s => ({
+    ...s,
+    price: settings.servicePrices![s.id] ?? s.price
+  }));
+};
+
+export const getAddOns = (settings?: AdminSettings): AddOnItem[] => {
+  if (!settings?.addOnPrices) return ADD_ONS;
+  return ADD_ONS.map(a => ({
+    ...a,
+    price: settings.addOnPrices![a.id] ?? a.price
+  }));
+};
+
 export const SHOE_TYPES = [
   'Sneakers / Casual',
   'Running / Sport',
@@ -133,10 +160,23 @@ export const SHOE_TYPES = [
   'Lainnya'
 ];
 
-export const DEFAULT_ADMIN_SETTINGS = {
+export const DEFAULT_ADMIN_SETTINGS: AdminSettings = {
   adminPhone: '6282239096626',
   storeName: 'Shoecare Manokwari',
   storeAddress: 'Manokwari, Papua Barat',
   autoSoundEnabled: true,
-  pickupFee: 15000
+  alarmSound: 'melodi',
+  servicePrices: {
+    'reguler': 35000,
+    'premium': 45000,
+    'express': 60000,
+    'repaint': 100000
+  },
+  addOnPrices: {
+    'unyellowing': 20000,
+    'suede_care': 30000,
+    'nano_waterproof': 15000,
+    'leather_balm': 15000,
+    'deodorizer_plus': 10000
+  }
 };

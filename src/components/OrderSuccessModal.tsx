@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { CustomerOrder } from '../types';
 import { formatRupiah, buildWhatsAppAdminUrl } from '../utils/storage';
-import { CheckCircle2, MessageSquare, Copy, Check, X, BellRing, Sparkles } from 'lucide-react';
+import { CheckCircle2, MessageSquare, Copy, Check, X, Sparkles, Search } from 'lucide-react';
 
 interface OrderSuccessModalProps {
   order: CustomerOrder;
@@ -35,7 +35,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
         {/* Close button */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 transition-colors"
+          className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 transition-colors cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
@@ -49,19 +49,6 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
           <p className="text-sm text-slate-600">
             Terima kasih, Kak <span className="font-semibold text-slate-800">{order.customerName}</span>. Pesanan cuci sepatu Anda telah didaftarkan ke sistem.
           </p>
-        </div>
-
-        {/* Automatic Admin Notification Banner */}
-        <div className="p-3.5 bg-emerald-50 border border-emerald-200/80 rounded-2xl flex items-center space-x-3 text-emerald-900 text-xs">
-          <div className="p-2 rounded-xl bg-emerald-100 text-emerald-700 shrink-0">
-            <BellRing className="w-5 h-5 animate-bounce" />
-          </div>
-          <div>
-            <p className="font-bold">Notifikasi Otomatis Terkirim ke Admin!</p>
-            <p className="text-emerald-700 mt-0.5">
-              Admin toko telah menerima alarm lonceng & notifikasi di dashboard admin.
-            </p>
-          </div>
         </div>
 
         {/* Order ID Ticket */}
@@ -86,12 +73,12 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
               <span>Layanan:</span>
               <span className="font-semibold text-slate-900">{order.serviceName} ({order.pairCount} Pasang)</span>
             </div>
-            <div className="flex justify-between">
-              <span>Metode:</span>
-              <span className="font-semibold text-slate-900">
-                {order.deliveryMethod === 'pickup' ? 'Antar-Jemput (Pickup)' : 'Antar ke Toko'}
-              </span>
-            </div>
+            {order.deliveryMethod === 'pickup' && (
+              <div className="flex justify-between items-center text-emerald-800 bg-emerald-50 px-2.5 py-1.5 rounded-lg text-[11px] font-medium border border-emerald-200">
+                <span>🛵 Antar-Jemput Kurir:</span>
+                <span className="font-bold truncate max-w-[180px]">{order.pickupZone || 'Wilayah Manokwari'}</span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span>Total Estimasi Biaya:</span>
               <span className="font-bold text-emerald-700">{formatRupiah(order.totalPrice)}</span>
@@ -112,6 +99,17 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
             <MessageSquare className="w-4 h-4" />
             <span>Kirim Chat WhatsApp ke Admin Sekarang</span>
           </a>
+
+          {onTrackOrder && (
+            <button
+              type="button"
+              onClick={() => onTrackOrder(order.id)}
+              className="w-full py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm flex items-center justify-center space-x-2 transition-colors cursor-pointer shadow-sm"
+            >
+              <Search className="w-4 h-4 text-emerald-400" />
+              <span>Lacak Progres Cuci Pesanan Ini</span>
+            </button>
+          )}
 
           <button
             id="btn-modal-close"

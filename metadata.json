@@ -1,6 +1,6 @@
 {
   "name": "Shoecare Manokwari - Cuci Sepatu & Perawatan Profesional",
-  "description": "Layanan cuci dan perawatan sepatu profesional di Manokwari, Papua Barat dengan katalog harga transparan, pendaftaran online, pelacak status cuci, dan notifikasi admin.",
+  "description": "Layanan cuci dan perawatan sepatu profesional di Manokwari, Papua Barat dengan katalog harga transparan, pendaftaran online, pelacak status cuci, laporan laba rugi, manajemen modal awal usaha, dan notifikasi admin.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

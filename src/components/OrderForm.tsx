@@ -1,18 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { SERVICES, ADD_ONS, SHOE_TYPES } from '../data/services';
-import { 
-  MAXIM_MANOKWARI_ZONES, 
-  MAXIM_MANOKWARI_CONFIG, 
-  calculateMaximFee,
-  MaximManokwariZone 
-} from '../data/maximZones';
-import { ServiceTier, CustomerOrder, DeliveryMethod, ShoeItemDetail } from '../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { getServices, getAddOns, SHOE_TYPES } from '../data/services';
+import { ServiceTier, CustomerOrder, ShoeItemDetail, AdminSettings } from '../types';
 import { formatRupiah, generateOrderId } from '../utils/storage';
 import { 
   Sparkles, 
-  MapPin, 
-  Truck, 
-  Store, 
   Camera, 
   Plus, 
   Trash2, 
@@ -25,38 +16,50 @@ import {
   Layers,
   ChevronRight,
   ReceiptText,
-  Bike,
-  Car,
+  Info,
+  Crown,
+  Tag,
+  MapPin,
+  Truck,
   Navigation,
+  Store,
+  Calendar,
+  LocateFixed,
   Compass,
-  ArrowRightLeft,
-  Info
+  ArrowRight
 } from 'lucide-react';
+import { 
+  MANOKWARI_DELIVERY_ZONES, 
+  DeliveryZone, 
+  DeliveryTripType, 
+  TIME_SLOTS, 
+  calculateDistanceKm, 
+  calculateDeliveryFeeByDistance, 
+  getRecommendedZoneByDistance,
+  SHOECARE_WORKSHOP_COORDS
+} from '../data/deliveryZones';
 
 interface OrderFormProps {
   initialServiceId?: ServiceTier;
-  pickupFee: number;
   onOrderCreated: (order: CustomerOrder) => void;
+  existingCustomers?: {name: string, phone: string}[];
+  allOrders?: CustomerOrder[];
+  settings?: AdminSettings;
 }
 
 export const OrderForm: React.FC<OrderFormProps> = ({
   initialServiceId = 'reguler',
-  pickupFee,
-  onOrderCreated
+  onOrderCreated,
+  existingCustomers = [],
+  allOrders = [],
+  settings
 }) => {
+  const SERVICES = getServices(settings);
+  const ADD_ONS = getAddOns(settings);
   // Form state
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [selectedService, setSelectedService] = useState<ServiceTier>(initialServiceId);
-  const [deliveryMethod, setDeliveryMethod] = useState<DeliveryMethod>('dropoff');
-  const [pickupAddress, setPickupAddress] = useState('');
-  const [pickupNotes, setPickupNotes] = useState('');
-
-  // Maxim Transportasi Kota Manokwari states
-  const [selectedMaximZone, setSelectedMaximZone] = useState<string>('sanggeng_padarni');
-  const [maximVehicle, setMaximVehicle] = useState<'motor' | 'mobil'>('motor');
-  const [maximTripType, setMaximTripType] = useState<'pp' | 'sekali_jalan'>('pp');
-  const [customKm, setCustomKm] = useState<number>(5);
   
   const [pairCount, setPairCount] = useState(1);
   const [shoeDetails, setShoeDetails] = useState<ShoeItemDetail[]>([
@@ -72,6 +75,23 @@ export const OrderForm: React.FC<OrderFormProps> = ({
   const [selectedAddOns, setSelectedAddOns] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Delivery / Pickup location states
+  const [deliveryMethod, setDeliveryMethod] = useState<'dropoff' | 'pickup'>('dropoff');
+  const [pickupTripType, setPickupTripType] = useState<DeliveryTripType>('pp');
+  const [selectedZoneId, setSelectedZoneId] = useState<string>('zona_1_kota');
+  const [pickupAddress, setPickupAddress] = useState('');
+  const [pickupBenchmark, setPickupBenchmark] = useState('');
+  const [pickupNotes, setPickupNotes] = useState('');
+  const [pickupTimeSlot, setPickupTimeSlot] = useState<string>('pagi');
+  const [preferredPickupDate, setPreferredPickupDate] = useState<string>(() => {
+    const today = new Date();
+    return today.toISOString().split('T')[0];
+  });
+  const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [pickupDistanceKm, setPickupDistanceKm] = useState<number | null>(null);
+  const [isLocatingGps, setIsLocatingGps] = useState(false);
+  const [gpsSuccessMsg, setGpsSuccessMsg] = useState<string | null>(null);
 
   // Sync if initialServiceId changes
   useEffect(() => {
@@ -117,7 +137,38 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        updateShoeDetail(index, 'photoUrl', reader.result as string);
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 800;
+          const MAX_HEIGHT = 800;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height *= MAX_WIDTH / width;
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width *= MAX_HEIGHT / height;
+              height = MAX_HEIGHT;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+            updateShoeDetail(index, 'photoUrl', dataUrl);
+          } else {
+            updateShoeDetail(index, 'photoUrl', reader.result as string);
+          }
+        };
+        img.src = reader.result as string;
       };
       reader.readAsDataURL(file);
     }
@@ -129,7 +180,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     );
   };
 
-  // Price calculations
+  // Price & Priority Customer calculations
   const currentServiceObj = SERVICES.find(s => s.id === selectedService) || SERVICES[0];
   const serviceBasePrice = currentServiceObj.price;
   const serviceSubtotal = serviceBasePrice * pairCount;
@@ -139,16 +190,70 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     return sum + (item ? item.price * pairCount : 0);
   }, 0);
 
-  // Calculate Maxim Delivery Fee based on authentic Manokwari transportation data
-  const maximFareCalc = calculateMaximFee({
-    zoneId: selectedMaximZone,
-    vehicle: maximVehicle,
-    tripType: maximTripType,
-    customKm
-  });
+  // Check historical total spent for this customer
+  const historicalTotalSpent = useMemo(() => {
+    if (!allOrders || !allOrders.length) return 0;
+    const cleanPhone = customerPhone.trim();
+    const cleanName = customerName.trim().toLowerCase();
 
-  const finalDeliveryFee = deliveryMethod === 'pickup' ? maximFareCalc.totalDeliveryFee : 0;
-  const grandTotal = serviceSubtotal + addOnsTotal + finalDeliveryFee;
+    if (!cleanPhone && !cleanName) return 0;
+
+    return allOrders.reduce((sum, o) => {
+      const matchPhone = cleanPhone && o.customerPhone.trim() === cleanPhone;
+      const matchName = cleanName && o.customerName.trim().toLowerCase() === cleanName;
+      if (matchPhone || matchName) {
+        return sum + (o.totalPrice || 0);
+      }
+      return sum;
+    }, 0);
+  }, [allOrders, customerPhone, customerName]);
+
+  // Delivery fee calculation
+  const selectedZone = useMemo(() => {
+    return MANOKWARI_DELIVERY_ZONES.find(z => z.id === selectedZoneId) || MANOKWARI_DELIVERY_ZONES[0];
+  }, [selectedZoneId]);
+
+  const deliveryFee = useMemo(() => {
+    if (deliveryMethod === 'dropoff') return 0;
+    if (pickupDistanceKm !== null && pickupDistanceKm > 0) {
+      return calculateDeliveryFeeByDistance(pickupDistanceKm, pickupTripType);
+    }
+    return pickupTripType === 'pp' ? selectedZone.priceRoundTrip : selectedZone.priceOneWay;
+  }, [deliveryMethod, pickupTripType, selectedZone, pickupDistanceKm]);
+
+  const handleDetectLocation = () => {
+    if (!navigator.geolocation) {
+      setGpsSuccessMsg('Browser Anda tidak mendukung GPS. Silakan pilih zona wilayah di bawah.');
+      return;
+    }
+    setIsLocatingGps(true);
+    setGpsSuccessMsg(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        const dist = calculateDistanceKm(lat, lng);
+        setPickupCoords({ lat, lng });
+        setPickupDistanceKm(dist);
+        const recZone = getRecommendedZoneByDistance(dist);
+        setSelectedZoneId(recZone.id);
+        setIsLocatingGps(false);
+        setGpsSuccessMsg(`📍 Lokasi terdeteksi! Estimasi jarak ke workshop Shoecare: ${dist} km (${recZone.name}).`);
+      },
+      (err) => {
+        setIsLocatingGps(false);
+        setGpsSuccessMsg('Izin lokasi tidak diberikan. Silakan pilih zona wilayah secara manual di bawah.');
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  const rawSubtotal = serviceSubtotal + addOnsTotal;
+
+  const isPriorityCustomer = historicalTotalSpent >= 1000000;
+  const priorityDiscount = isPriorityCustomer ? 100000 : 0;
+  const totalDiscount = priorityDiscount;
+  const grandTotal = Math.max(0, rawSubtotal + deliveryFee - totalDiscount);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -166,7 +271,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
     }
 
     if (deliveryMethod === 'pickup' && !pickupAddress.trim()) {
-      setErrorMessage('Untuk metode Antar-Jemput Kurir Maxim, silakan masukkan Alamat Lengkap Penjemputan di Manokwari.');
+      setErrorMessage('Silakan isi alamat lengkap penjemputan sepatu Anda di Manokwari.');
       return;
     }
 
@@ -178,13 +283,16 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       createdAt: new Date().toISOString(),
       customerName: customerName.trim(),
       customerPhone: customerPhone.trim(),
-      deliveryMethod,
+      deliveryMethod: deliveryMethod,
       pickupAddress: deliveryMethod === 'pickup' ? pickupAddress.trim() : undefined,
-      pickupNotes: deliveryMethod === 'pickup' ? pickupNotes.trim() : undefined,
-      pickupZone: deliveryMethod === 'pickup' ? maximFareCalc.zoneName : undefined,
-      maximVehicle: deliveryMethod === 'pickup' ? maximVehicle : undefined,
-      maximTripType: deliveryMethod === 'pickup' ? maximTripType : undefined,
-      pickupDistanceKm: deliveryMethod === 'pickup' ? maximFareCalc.distanceKm : undefined,
+      pickupBenchmark: deliveryMethod === 'pickup' && pickupBenchmark.trim() ? pickupBenchmark.trim() : undefined,
+      pickupNotes: deliveryMethod === 'pickup' && pickupNotes.trim() ? pickupNotes.trim() : undefined,
+      pickupZone: deliveryMethod === 'pickup' ? selectedZone.name : undefined,
+      pickupTimeSlot: deliveryMethod === 'pickup' ? pickupTimeSlot : undefined,
+      pickupTripType: deliveryMethod === 'pickup' ? pickupTripType : undefined,
+      pickupCoords: deliveryMethod === 'pickup' && pickupCoords ? pickupCoords : undefined,
+      pickupDistanceKm: deliveryMethod === 'pickup' && pickupDistanceKm ? pickupDistanceKm : undefined,
+      preferredDate: deliveryMethod === 'pickup' ? preferredPickupDate : undefined,
       serviceId: selectedService,
       serviceName: currentServiceObj.name,
       servicePrice: currentServiceObj.price,
@@ -192,7 +300,9 @@ export const OrderForm: React.FC<OrderFormProps> = ({
       shoeDetails,
       selectedAddOns,
       addOnsTotal,
-      deliveryFee: finalDeliveryFee,
+      deliveryFee: deliveryFee,
+      discount: totalDiscount,
+      isPriorityCustomer,
       totalPrice: grandTotal,
       status: 'menunggu_konfirmasi',
       paymentStatus: 'belum_bayar',
@@ -200,7 +310,9 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         {
           status: 'menunggu_konfirmasi',
           timestamp: new Date().toISOString(),
-          note: 'Pendaftaran pesanan diterima. Menunggu verifikasi admin.'
+          note: deliveryMethod === 'pickup'
+            ? `Pendaftaran pesanan diterima dengan permintaan antar-jemput kurir (${selectedZone.name}). Menunggu konfirmasi admin.`
+            : 'Pendaftaran pesanan diterima. Menunggu verifikasi admin.'
         }
       ],
       isReadByAdmin: false
@@ -219,8 +331,8 @@ export const OrderForm: React.FC<OrderFormProps> = ({
         <div className="inline-flex items-center space-x-2.5 px-3 py-1.5 rounded-full bg-white text-slate-800 border border-slate-200 text-xs font-bold shadow-sm">
           <div className="w-6 h-6 rounded-lg overflow-hidden border border-slate-100">
             <img 
-              src="/src/assets/images/shoecare_manokwari_logo_1788629081132.jpg" 
-              alt="Logo" 
+              src="/logo.jpg" 
+              alt="Logo Shoecare Manokwari" 
               className="w-full h-full object-cover"
               referrerPolicy="no-referrer"
             />
@@ -249,7 +361,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           </span>
           <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
           <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 flex items-center space-x-1 shrink-0">
-            <span>4. Pengantaran</span>
+            <span>4. Kontak Pemesan</span>
           </span>
           <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />
           <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 flex items-center space-x-1 shrink-0">
@@ -296,11 +408,11 @@ export const OrderForm: React.FC<OrderFormProps> = ({
                   <div className="space-y-1.5">
                     {/* Package Illustration (Mini) */}
                     {srv.imageUrl && (
-                      <div className="w-full h-20 mb-2 rounded-xl overflow-hidden border border-slate-100 bg-white">
+                      <div className="w-full h-20 mb-2 rounded-xl overflow-hidden border border-slate-100 bg-slate-50/70 flex items-center justify-center p-1">
                         <img 
                           src={srv.imageUrl} 
                           alt={srv.name} 
-                          className="w-full h-full object-cover"
+                          className="w-full h-full object-contain"
                           referrerPolicy="no-referrer"
                         />
                       </div>
@@ -518,6 +630,10 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             {ADD_ONS.map((addon) => {
               const isChecked = selectedAddOns.includes(addon.id);
+              const isSuedeAddon = addon.id === 'suede_care';
+              const isRelevantSuede = isSuedeAddon && shoeDetails.some(s => s.shoeType.toLowerCase().includes('suede'));
+              const isRelevantLeather = addon.id === 'leather_balm' && shoeDetails.some(s => s.shoeType.toLowerCase().includes('leather'));
+
               return (
                 <div
                   key={addon.id}
@@ -525,20 +641,42 @@ export const OrderForm: React.FC<OrderFormProps> = ({
                   onClick={() => toggleAddOn(addon.id)}
                   className={`p-4 rounded-2xl border cursor-pointer transition-all flex items-start space-x-3.5 hover:scale-[1.005] ${
                     isChecked
-                      ? 'border-emerald-600 bg-emerald-50/40 shadow-xs'
-                      : 'border-slate-200 hover:border-slate-300 bg-white'
+                      ? isSuedeAddon
+                        ? 'border-amber-500 bg-amber-50/50 shadow-xs ring-1 ring-amber-400/40'
+                        : 'border-emerald-600 bg-emerald-50/40 shadow-xs'
+                      : isRelevantSuede
+                        ? 'border-amber-300 bg-amber-50/20 hover:border-amber-400'
+                        : 'border-slate-200 hover:border-slate-300 bg-white'
                   }`}
                 >
                   <input
                     type="checkbox"
                     checked={isChecked}
                     onChange={() => {}}
-                    className="mt-1 h-4 w-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300 cursor-pointer"
+                    className={`mt-1 h-4 w-4 rounded cursor-pointer ${
+                      isSuedeAddon
+                        ? 'text-amber-600 focus:ring-amber-500 border-amber-300'
+                        : 'text-emerald-600 focus:ring-emerald-500 border-slate-300'
+                    }`}
                   />
                   <div className="flex-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-bold text-slate-900">{addon.name}</span>
-                      <span className="text-xs font-black text-emerald-700">+{formatRupiah(addon.price)}</span>
+                    <div className="flex items-center justify-between gap-1 flex-wrap">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-sm font-bold text-slate-900">{addon.name}</span>
+                        {isRelevantSuede && (
+                          <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-200 text-amber-900 border border-amber-300">
+                            ⭐ Cocok Bahan Suede
+                          </span>
+                        )}
+                        {isRelevantLeather && (
+                          <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-blue-100 text-blue-900 border border-blue-200">
+                            ⭐ Cocok Bahan Kulit
+                          </span>
+                        )}
+                      </div>
+                      <span className={`text-xs font-black ${isSuedeAddon ? 'text-amber-700' : 'text-emerald-700'}`}>
+                        +{formatRupiah(addon.price)}
+                      </span>
                     </div>
                     <p className="text-xs text-slate-500 mt-1 leading-relaxed">{addon.description}</p>
                   </div>
@@ -548,326 +686,251 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           </div>
         </div>
 
-        {/* STEP 4: METODE PENYERAHAN */}
-        <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/90 shadow-xs space-y-5">
-          <div className="flex items-center space-x-3 border-b border-slate-100 pb-4">
-            <div className="w-8 h-8 rounded-xl bg-slate-900 text-white font-bold flex items-center justify-center text-xs shadow-xs">
-              4
+        {/* STEP 4: METODE PENGIRIMAN & LOKASI ANTAR-JEMPUT */}
+        <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/90 shadow-xs space-y-6">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 rounded-xl bg-slate-900 text-white font-bold flex items-center justify-center text-xs shadow-xs">
+                4
+              </div>
+              <div>
+                <h3 className="text-base sm:text-lg font-extrabold text-slate-900">Metode Pengiriman & Antar-Jemput</h3>
+                <p className="text-xs text-slate-500">Pilih antar sendiri ke toko atau kurir kami yang jemput ke rumah Anda</p>
+              </div>
             </div>
-            <div>
-              <h3 className="text-base sm:text-lg font-extrabold text-slate-900">Metode Penyerahan Sepatu</h3>
-              <p className="text-xs text-slate-500">Pilih antar sendiri ke outlet atau dijemput kurir kami</p>
-            </div>
+            <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 hidden sm:inline">
+              Wilayah Manokwari
+            </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Toggle: Drop-off vs Antar-Jemput Kurir */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            {/* Opsi 1: Drop-off Outlet */}
             <div
-              id="delivery-dropoff"
               onClick={() => setDeliveryMethod('dropoff')}
-              className={`p-5 rounded-2xl border-2 cursor-pointer transition-all flex items-start space-x-3.5 hover:scale-[1.005] ${
+              className={`p-4 rounded-2xl border cursor-pointer transition-all flex items-start space-x-3.5 ${
                 deliveryMethod === 'dropoff'
-                  ? 'border-emerald-600 bg-emerald-50/40 ring-2 ring-emerald-600/20'
+                  ? 'border-emerald-600 bg-emerald-50/50 ring-2 ring-emerald-500/20 shadow-xs'
                   : 'border-slate-200 hover:border-slate-300 bg-white'
               }`}
             >
-              <div className="p-3 rounded-xl bg-slate-100 text-slate-800 mt-0.5">
+              <div className={`p-2.5 rounded-xl ${deliveryMethod === 'dropoff' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
                 <Store className="w-5 h-5" />
               </div>
-              <div>
-                <div className="flex items-center space-x-2">
-                  <span className="font-extrabold text-slate-900 text-sm">Antar Sendiri ke Outlet</span>
-                  <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">Gratis</span>
+              <div className="flex-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold text-slate-900">Antar Sendiri ke Toko</span>
+                  <span className="text-xs font-black text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full">GRATIS</span>
                 </div>
-                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                  Anda menyerahkan dan mengambil kembali sepatu langsung di outlet Shoecare Manokwari.
+                <p className="text-xs text-slate-500 mt-1">
+                  Bawa sepatu langsung ke workshop Shoecare Manokwari di Sanggeng / Pusat Kota.
                 </p>
               </div>
             </div>
 
+            {/* Opsi 2: Layanan Antar-Jemput Kurir */}
             <div
-              id="delivery-pickup"
               onClick={() => setDeliveryMethod('pickup')}
-              className={`p-5 rounded-2xl border-2 cursor-pointer transition-all flex items-start space-x-3.5 hover:scale-[1.005] ${
+              className={`p-4 rounded-2xl border cursor-pointer transition-all flex items-start space-x-3.5 ${
                 deliveryMethod === 'pickup'
-                  ? 'border-amber-500 bg-amber-50/40 ring-2 ring-amber-500/20'
+                  ? 'border-emerald-600 bg-emerald-50/50 ring-2 ring-emerald-500/20 shadow-xs'
                   : 'border-slate-200 hover:border-slate-300 bg-white'
               }`}
             >
-              <div className="p-3 rounded-xl bg-[#FEE300] text-slate-900 mt-0.5 shadow-xs">
-                <Bike className="w-5 h-5" />
+              <div className={`p-2.5 rounded-xl ${deliveryMethod === 'pickup' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                <Truck className="w-5 h-5" />
               </div>
-              <div>
-                <div className="flex items-center space-x-2 flex-wrap gap-y-1">
-                  <span className="font-extrabold text-slate-900 text-sm">Antar-Jemput Kurir Maxim</span>
-                  <span className="text-[10px] bg-[#FEE300] text-slate-950 px-2 py-0.5 rounded-full font-black border border-amber-300">
-                    Tarif Maxim Manokwari
-                  </span>
+              <div className="flex-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold text-slate-900">Layanan Antar-Jemput</span>
+                  <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">Praktis</span>
                 </div>
-                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                  Kurir Maxim menjemput dan mengantar kembali sepatu Anda di seluruh wilayah Kota Manokwari.
+                <p className="text-xs text-slate-500 mt-1">
+                  Kurir kami menjemput dan mengantar sepatu langsung ke alamat Anda di Manokwari.
                 </p>
-                {deliveryMethod === 'pickup' && (
-                  <p className="text-xs font-black text-amber-700 mt-1.5">
-                    Biaya Kurir: {formatRupiah(maximFareCalc.totalDeliveryFee)} ({maximTripType === 'pp' ? 'PP Bolak-Balik' : '1x Jalan'})
-                  </p>
-                )}
               </div>
             </div>
           </div>
 
-          {/* Conditional Pickup Address & Maxim Manokwari Calculator */}
+          {/* Sub-form Antar-Jemput Lokasi */}
           {deliveryMethod === 'pickup' && (
-            <div className="mt-4 p-5 sm:p-6 rounded-2xl bg-gradient-to-br from-amber-50/70 via-slate-50 to-amber-50/40 border-2 border-amber-200 space-y-5">
-              {/* Maxim Header */}
-              <div className="flex items-center justify-between flex-wrap gap-2 pb-3 border-b border-amber-200/80">
-                <div className="flex items-center space-x-2.5">
-                  <div className="w-7 h-7 rounded-lg bg-[#FEE300] flex items-center justify-center font-black text-slate-900 text-xs shadow-xs border border-amber-400">
-                    M
-                  </div>
-                  <div>
-                    <div className="flex items-center space-x-2">
-                      <h4 className="text-xs sm:text-sm font-black text-slate-900 uppercase tracking-wide">
-                        Kalkulator Ongkir Maxim Manokwari
-                      </h4>
-                      <span className="text-[10px] bg-slate-900 text-amber-300 font-bold px-2 py-0.5 rounded">
-                        Papua Barat
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-600 mt-0.5">
-                      Perhitungan otomatis mengikuti tarif resmi Maxim Bike & Car Delivery di Kota Manokwari
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Step A: Pilihan Armada Maxim */}
-              <div>
-                <label className="block text-xs font-black text-slate-800 uppercase tracking-wider mb-2">
-                  1. Pilih Jenis Armada Maxim
+            <div className="space-y-5 pt-3 border-t border-slate-100 animate-fade-in">
+              {/* 1. Pilihan Tipe Perjalanan */}
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-slate-700">
+                  Pilih Skema Layanan Kurir:
                 </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setMaximVehicle('motor')}
-                    className={`p-3.5 rounded-xl border text-left transition-all flex items-start space-x-3 ${
-                      maximVehicle === 'motor'
-                        ? 'border-amber-500 bg-white ring-2 ring-amber-400 shadow-xs'
-                        : 'border-slate-200 bg-slate-50 hover:bg-white'
-                    }`}
-                  >
-                    <div className="p-2 rounded-lg bg-amber-100 text-amber-900 mt-0.5">
-                      <Bike className="w-4 h-4" />
-                    </div>
-                    <div className="flex-1 min-w-0">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                  {[
+                    { id: 'pp', label: 'Antar-Jemput (Bolak-Balik)', badge: 'Paling Diminati', desc: 'Jemput kotor + Antar bersih' },
+                    { id: 'jemput_saja', label: 'Jemput Saja', badge: '1x Jalan', desc: 'Jemput di rumah, ambil di toko' },
+                    { id: 'antar_saja', label: 'Antar Saja', badge: '1x Jalan', desc: 'Taruh di toko, kami antar pulang' },
+                  ].map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setPickupTripType(t.id as DeliveryTripType)}
+                      className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                        pickupTripType === t.id
+                          ? 'border-emerald-600 bg-emerald-50/70 text-slate-900 font-bold ring-1 ring-emerald-500'
+                          : 'border-slate-200 bg-slate-50/60 text-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-extrabold text-slate-900">Maxim Bike (Motor)</span>
-                        <span className="text-[11px] font-black text-emerald-700">Mulai Rp 8.000</span>
-                      </div>
-                      <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">
-                        Dasar 0-2 km Rp 8.000 (+Rp 2.500/km berikutnya). Ideal untuk 1-4 pasang sepatu.
-                      </p>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setMaximVehicle('mobil')}
-                    className={`p-3.5 rounded-xl border text-left transition-all flex items-start space-x-3 ${
-                      maximVehicle === 'mobil'
-                        ? 'border-amber-500 bg-white ring-2 ring-amber-400 shadow-xs'
-                        : 'border-slate-200 bg-slate-50 hover:bg-white'
-                    }`}
-                  >
-                    <div className="p-2 rounded-lg bg-blue-100 text-blue-900 mt-0.5">
-                      <Car className="w-4 h-4" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-extrabold text-slate-900">Maxim Car (Mobil)</span>
-                        <span className="text-[11px] font-black text-emerald-700">Mulai Rp 12.000</span>
-                      </div>
-                      <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">
-                        Dasar 0-3 km Rp 12.000 (+Rp 4.000/km berikutnya). Muat banyak pasang & aman saat cuaca hujan.
-                      </p>
-                    </div>
-                  </button>
-                </div>
-
-                {pairCount > 4 && maximVehicle === 'motor' && (
-                  <div className="mt-2 flex items-center space-x-2 text-[11px] text-amber-800 bg-amber-100/80 px-3 py-1.5 rounded-lg border border-amber-200">
-                    <Info className="w-3.5 h-3.5 shrink-0" />
-                    <span>Untuk {pairCount} pasang sepatu, disarankan menggunakan Maxim Car (Mobil) agar lebih leluasa.</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Step B: Skema Perjalanan Trip */}
-              <div>
-                <label className="block text-xs font-black text-slate-800 uppercase tracking-wider mb-2">
-                  2. Skema Antar-Jemput
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setMaximTripType('pp')}
-                    className={`p-3 rounded-xl border text-left transition-all flex items-start space-x-2.5 ${
-                      maximTripType === 'pp'
-                        ? 'border-amber-500 bg-white ring-2 ring-amber-400 shadow-xs'
-                        : 'border-slate-200 bg-slate-50 hover:bg-white'
-                    }`}
-                  >
-                    <div className="p-1.5 rounded-md bg-emerald-100 text-emerald-800 mt-0.5">
-                      <ArrowRightLeft className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="flex items-center space-x-1.5">
-                        <span className="text-xs font-bold text-slate-900">Bolak-Balik PP (2x Perjalanan)</span>
-                        <span className="text-[9px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.2 rounded">Rekomendasi</span>
-                      </div>
-                      <p className="text-[10px] text-slate-500 mt-0.5">
-                        Sepatu dijemput kurir saat kotor, lalu diantar kembali setelah selesai dicuci.
-                      </p>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setMaximTripType('sekali_jalan')}
-                    className={`p-3 rounded-xl border text-left transition-all flex items-start space-x-2.5 ${
-                      maximTripType === 'sekali_jalan'
-                        ? 'border-amber-500 bg-white ring-2 ring-amber-400 shadow-xs'
-                        : 'border-slate-200 bg-slate-50 hover:bg-white'
-                    }`}
-                  >
-                    <div className="p-1.5 rounded-md bg-slate-200 text-slate-700 mt-0.5">
-                      <Navigation className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <span className="text-xs font-bold text-slate-900">Sekali Jalan (1x Perjalanan)</span>
-                      <p className="text-[10px] text-slate-500 mt-0.5">
-                        Hanya jemput saja (nanti ambil sendiri), atau antar saja saat selesai.
-                      </p>
-                    </div>
-                  </button>
-                </div>
-              </div>
-
-              {/* Step C: Pilihan Wilayah / Zona di Manokwari */}
-              <div>
-                <label className="block text-xs font-black text-slate-800 uppercase tracking-wider mb-2 flex items-center justify-between">
-                  <span>3. Wilayah / Lokasi Penjemputan di Kota Manokwari</span>
-                  <span className="text-[10px] text-slate-500 font-normal">Pilih kelurahan/kawasan terdekat</span>
-                </label>
-
-                <div className="space-y-2">
-                  <select
-                    id="select-maxim-zone"
-                    value={selectedMaximZone}
-                    onChange={(e) => setSelectedMaximZone(e.target.value)}
-                    className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white font-medium shadow-xs"
-                  >
-                    {MAXIM_MANOKWARI_ZONES.map((zone) => {
-                      const fare = maximVehicle === 'motor' ? zone.motorFeeSingle : zone.carFeeSingle;
-                      const calculatedTotal = fare * (maximTripType === 'pp' ? 2 : 1);
-                      return (
-                        <option key={zone.id} value={zone.id}>
-                          {zone.name} • {zone.district} ({formatRupiah(calculatedTotal)})
-                        </option>
-                      );
-                    })}
-                  </select>
-
-                  {/* Zone description / landmarks */}
-                  {selectedMaximZone !== 'custom_km' && (
-                    <div className="text-[11px] text-slate-600 bg-white/80 p-2.5 rounded-xl border border-slate-200/80 flex items-start space-x-2">
-                      <MapPin className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
-                      <div>
-                        <span className="font-bold text-slate-800">Cakupan Patokan: </span>
-                        <span>
-                          {MAXIM_MANOKWARI_ZONES.find(z => z.id === selectedMaximZone)?.landmarks}
+                        <span className="font-bold">{t.label}</span>
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-white border border-slate-200 text-slate-600 font-medium">
+                          {t.badge}
                         </span>
                       </div>
-                    </div>
-                  )}
-
-                  {/* Custom KM Slider if selected */}
-                  {selectedMaximZone === 'custom_km' && (
-                    <div className="p-3.5 rounded-xl bg-white border border-amber-300 space-y-2.5">
-                      <div className="flex items-center justify-between text-xs font-bold text-slate-800">
-                        <span>Estimasi Jarak dari Outlet:</span>
-                        <span className="text-amber-700 font-black text-sm">{customKm} KM</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="1"
-                        max="30"
-                        step="0.5"
-                        value={customKm}
-                        onChange={(e) => setCustomKm(parseFloat(e.target.value))}
-                        className="w-full accent-amber-500 cursor-pointer"
-                      />
-                      <div className="flex justify-between text-[10px] text-slate-400">
-                        <span>1 KM (Dalam Kota)</span>
-                        <span>15 KM (Pinggiran)</span>
-                        <span>30 KM (Luar Kota)</span>
-                      </div>
-                    </div>
-                  )}
+                      <p className="text-[11px] text-slate-500 mt-1 font-normal">{t.desc}</p>
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {/* Maxim Calculation Summary Card */}
-              <div className="p-4 rounded-xl bg-slate-900 text-white flex items-center justify-between flex-wrap gap-3 shadow-sm border border-slate-800">
-                <div className="space-y-0.5">
-                  <div className="flex items-center space-x-2">
-                    <span className="text-[11px] font-black uppercase text-amber-400 tracking-wider">
-                      Biaya Ongkir Maxim:
-                    </span>
-                    <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded font-mono">
-                      {maximFareCalc.zoneName}
-                    </span>
+              {/* 2. Tombol Deteksi Lokasi GPS Cepat */}
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center space-x-2.5">
+                  <div className="p-2 rounded-lg bg-emerald-100 text-emerald-700">
+                    <LocateFixed className="w-4 h-4" />
                   </div>
-                  <p className="text-[11px] text-slate-300">
-                    Armada: <span className="font-semibold text-white">{maximVehicle === 'motor' ? 'Maxim Motor' : 'Maxim Mobil'}</span> • 
-                    Trip: <span className="font-semibold text-white">{maximTripType === 'pp' ? 'PP Bolak-Balik' : '1x Jalan'}</span> • 
-                    Jarak: <span className="font-semibold text-white">{maximFareCalc.distanceKm} km</span>
-                  </p>
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 block">Deteksi Lokasi GPS Otomatis</span>
+                    <span className="text-[11px] text-slate-500">Hitung jarak presisi (KM) dari workshop kami di Sanggeng</span>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <p className="text-[10px] text-slate-400">Total Ongkir Maxim</p>
-                  <p className="text-lg font-black text-amber-400">
-                    {formatRupiah(maximFareCalc.totalDeliveryFee)}
-                  </p>
+
+                <button
+                  type="button"
+                  onClick={handleDetectLocation}
+                  disabled={isLocatingGps}
+                  className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center justify-center space-x-1.5 transition-all shadow-xs cursor-pointer shrink-0 disabled:opacity-50"
+                >
+                  <Navigation className={`w-3.5 h-3.5 ${isLocatingGps ? 'animate-spin' : ''}`} />
+                  <span>{isLocatingGps ? 'Mendeteksi GPS...' : 'Gunakan Lokasi Saya (GPS)'}</span>
+                </button>
+              </div>
+
+              {gpsSuccessMsg && (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-start space-x-2 animate-fade-in">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  <span>{gpsSuccessMsg}</span>
+                </div>
+              )}
+
+              {/* 3. Pilihan Zona Wilayah di Manokwari */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-700 flex items-center space-x-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Pilih Wilayah / Zona Penjemputan di Manokwari:</span>
+                  </label>
+                  <span className="text-[11px] text-slate-500">
+                    Tarif {pickupTripType === 'pp' ? 'Bolak-Balik (PP)' : '1x Jalan'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {MANOKWARI_DELIVERY_ZONES.map((zone) => {
+                    const isSelected = selectedZoneId === zone.id;
+                    const zonePrice = pickupTripType === 'pp' ? zone.priceRoundTrip : zone.priceOneWay;
+
+                    return (
+                      <div
+                        key={zone.id}
+                        onClick={() => {
+                          setSelectedZoneId(zone.id);
+                          setPickupDistanceKm(zone.distanceEstimateKm);
+                        }}
+                        className={`p-3.5 rounded-2xl border cursor-pointer transition-all flex flex-col justify-between ${
+                          isSelected
+                            ? 'border-emerald-600 bg-emerald-50/50 shadow-xs ring-1 ring-emerald-500/30'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-black text-slate-900">{zone.name}</span>
+                            <span className="text-xs font-black text-emerald-700 font-mono">
+                              {formatRupiah(zonePrice)}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-1 line-clamp-1">
+                            {zone.coverage.join(', ')}
+                          </p>
+                        </div>
+
+                        <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-500">
+                          <span>Radius ~{zone.distanceEstimateKm} km</span>
+                          <span className={isSelected ? 'text-emerald-700 font-bold' : 'text-slate-400'}>
+                            {isSelected ? '✓ Terpilih' : 'Pilih Zona'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Alamat Lengkap & Catatan */}
-              <div className="space-y-3 pt-1 border-t border-amber-200/80">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Alamat Lengkap Penjemputan di Manokwari <span className="text-rose-500">*</span>
+              {/* 4. Detail Alamat Lengkap & Patokan Rumah */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center space-x-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Alamat Lengkap Penjemputan di Manokwari</span>
+                    <span className="text-rose-500">*</span>
                   </label>
                   <textarea
-                    id="input-pickup-address"
                     rows={2}
                     value={pickupAddress}
                     onChange={(e) => setPickupAddress(e.target.value)}
-                    placeholder="Nama jalan, nomor rumah, RT/RW, kelurahan (cth: Jl. Trikora Wosi Dalam, RT 02/03 dekat kios Berkah)"
-                    className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white shadow-xs"
-                    required
+                    placeholder="Contoh: Jl. Merdeka No. 12, Sanggeng, dekat Pasar Tingkat, RT 02 / RW 01"
+                    className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white shadow-xs"
+                    required={deliveryMethod === 'pickup'}
                   />
                 </div>
+
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Catatan Khusus Penjemputan / Patokan Lokasi
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    Patokan / Ciri Rumah (Memudahkan Kurir)
                   </label>
                   <input
                     type="text"
-                    id="input-pickup-notes"
+                    value={pickupBenchmark}
+                    onChange={(e) => setPickupBenchmark(e.target.value)}
+                    placeholder="Contoh: Rumah cat hijau, samping Kios Mama Maria"
+                    className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white shadow-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center space-x-1.5">
+                    <Clock className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Waktu Penjemputan yang Diinginkan</span>
+                  </label>
+                  <select
+                    value={pickupTimeSlot}
+                    onChange={(e) => setPickupTimeSlot(e.target.value)}
+                    className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white shadow-xs cursor-pointer"
+                  >
+                    {TIME_SLOTS.map((slot) => (
+                      <option key={slot.id} value={slot.id}>
+                        {slot.icon} {slot.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    Catatan Khusus untuk Kurir (Opsional)
+                  </label>
+                  <input
+                    type="text"
                     value={pickupNotes}
                     onChange={(e) => setPickupNotes(e.target.value)}
-                    placeholder="Misal: Siang jam 13.00 WIT, rumah cat biru pagar hitam samping gereja"
-                    className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white shadow-xs"
+                    placeholder="Contoh: Mohon hubungi WhatsApp sebelum tiba, ada anjing di halaman"
+                    className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white shadow-xs"
                   />
                 </div>
               </div>
@@ -875,7 +938,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           )}
         </div>
 
-        {/* STEP 5: INFORMASI KONTAK PELANGGAN */}
+        {/* STEP 5: INFORMASI KONTAK PEMESAN */}
         <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/90 shadow-xs space-y-5">
           <div className="flex items-center space-x-3 border-b border-slate-100 pb-4">
             <div className="w-8 h-8 rounded-xl bg-slate-900 text-white font-bold flex items-center justify-center text-xs shadow-xs">
@@ -888,7 +951,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
+            <div className="relative">
               <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center space-x-1.5">
                 <User className="w-3.5 h-3.5 text-slate-400" />
                 <span>Nama Lengkap Anda</span>
@@ -898,14 +961,37 @@ export const OrderForm: React.FC<OrderFormProps> = ({
                 type="text"
                 id="input-customer-name"
                 value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
+                onChange={(e) => {
+                  const name = e.target.value;
+                  setCustomerName(name);
+                }}
                 placeholder="Contoh: Budi Santoso"
                 className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white shadow-xs"
                 required
+                autoComplete="off"
               />
+              {/* Custom Suggestions Dropdown */}
+              {customerName.length >= 2 && !existingCustomers.find(c => c.name.toLowerCase() === customerName.toLowerCase()) && (
+                <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                  {Array.from(new Map(existingCustomers.filter(c => c.name.toLowerCase().includes(customerName.toLowerCase())).map(item => [item.name, item])).values()).map((customer, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        setCustomerName(customer.name);
+                        setCustomerPhone(customer.phone);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex flex-col border-b border-slate-100 last:border-0"
+                    >
+                      <span className="font-bold text-slate-800">{customer.name}</span>
+                      <span className="text-xs text-slate-500">{customer.phone}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
-            <div>
+            <div className="relative">
               <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center space-x-1.5">
                 <Phone className="w-3.5 h-3.5 text-slate-400" />
                 <span>Nomor WhatsApp (Aktif)</span>
@@ -915,11 +1001,34 @@ export const OrderForm: React.FC<OrderFormProps> = ({
                 type="tel"
                 id="input-customer-phone"
                 value={customerPhone}
-                onChange={(e) => setCustomerPhone(e.target.value)}
+                onChange={(e) => {
+                  const phone = e.target.value;
+                  setCustomerPhone(phone);
+                }}
                 placeholder="Contoh: 081234567890"
                 className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white shadow-xs"
                 required
+                autoComplete="off"
               />
+              {/* Custom Suggestions Dropdown for Phone */}
+              {customerPhone.length >= 4 && !existingCustomers.find(c => c.phone === customerPhone) && (
+                <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                  {Array.from(new Map(existingCustomers.filter(c => c.phone.includes(customerPhone)).map(item => [item.phone, item])).values()).map((customer, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        setCustomerName(customer.name);
+                        setCustomerPhone(customer.phone);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm hover:bg-slate-50 flex flex-col border-b border-slate-100 last:border-0"
+                    >
+                      <span className="font-bold text-slate-800">{customer.name}</span>
+                      <span className="text-xs text-slate-500">{customer.phone}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               <span className="text-[11px] text-slate-500 mt-1 block">
                 Pemberitahuan progres cuci akan dikirimkan langsung ke nomor ini.
               </span>
@@ -940,6 +1049,29 @@ export const OrderForm: React.FC<OrderFormProps> = ({
             <span className="text-xs text-slate-400 hidden sm:inline">Transparan & Tanpa Biaya Tersembunyi</span>
           </div>
 
+          {/* Priority Customer VIP Badge Banner */}
+          {isPriorityCustomer && (
+            <div className="p-4 bg-gradient-to-r from-amber-500/20 via-amber-500/10 to-amber-500/20 rounded-2xl border border-amber-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-amber-200">
+              <div className="flex items-center space-x-3">
+                <div className="p-2 rounded-xl bg-amber-500 text-slate-950 font-black">
+                  <Crown className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="font-extrabold text-sm text-amber-300 flex items-center space-x-1.5">
+                    <span>Pelanggan Prioritas (VIP)</span>
+                    <span className="text-[10px] bg-amber-400 text-slate-950 px-2 py-0.5 rounded-full font-black uppercase">Aktif</span>
+                  </div>
+                  <p className="text-xs text-amber-200/90 mt-0.5">
+                    Total riwayat cuci Anda telah mencapai <strong>{formatRupiah(historicalTotalSpent)}</strong> (≥ Rp 1.000.000).
+                  </p>
+                </div>
+              </div>
+              <span className="text-xs font-black bg-amber-400 text-slate-950 px-3 py-1.5 rounded-xl whitespace-nowrap shadow-sm">
+                Hemat Rp 100.000
+              </span>
+            </div>
+          )}
+
           <div className="space-y-3.5 text-sm">
             <div className="flex justify-between items-center text-slate-300">
               <div>
@@ -959,17 +1091,30 @@ export const OrderForm: React.FC<OrderFormProps> = ({
               </div>
             )}
 
-            <div className="flex justify-between items-center text-slate-300">
-              <div>
-                <span className="font-semibold text-white">Metode Pengantaran</span>
-                <span className="text-xs text-slate-400 block">
-                  {deliveryMethod === 'pickup' ? 'Kurir Antar-Jemput Shoecare Manokwari' : 'Antar Mandiri ke Outlet'}
-                </span>
+            {deliveryMethod === 'pickup' && (
+              <div className="flex justify-between items-center text-slate-300">
+                <div>
+                  <span className="font-semibold text-white flex items-center space-x-1.5">
+                    <Truck className="w-4 h-4 text-emerald-400" />
+                    <span>Ongkos Antar-Jemput ({pickupTripType === 'pp' ? 'Bolak-Balik / PP' : pickupTripType === 'jemput_saja' ? 'Jemput Saja' : 'Antar Saja'})</span>
+                  </span>
+                  <span className="text-xs text-slate-400 block">
+                    {selectedZone.name} {pickupDistanceKm ? `(Radius ~${pickupDistanceKm} km)` : ''}
+                  </span>
+                </div>
+                <span className="font-bold text-emerald-400 text-base">+{formatRupiah(deliveryFee)}</span>
               </div>
-              <span className="font-bold text-white text-base">
-                {finalDeliveryFee > 0 ? `+${formatRupiah(finalDeliveryFee)}` : 'Gratis'}
-              </span>
-            </div>
+            )}
+
+            {isPriorityCustomer && (
+              <div className="flex justify-between items-center text-amber-400 font-bold pt-2 border-t border-slate-800">
+                <div className="flex items-center space-x-1.5">
+                  <Crown className="w-4 h-4 text-amber-400" />
+                  <span>Potongan Pelanggan Prioritas (VIP)</span>
+                </div>
+                <span className="text-base text-amber-300">- {formatRupiah(priorityDiscount)}</span>
+              </div>
+            )}
 
             <div className="pt-4 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
@@ -986,7 +1131,7 @@ export const OrderForm: React.FC<OrderFormProps> = ({
           <div className="p-4 bg-slate-800/80 rounded-2xl border border-slate-700/80 flex items-center space-x-3.5 text-xs text-slate-300">
             <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
             <span className="leading-relaxed">
-              Begitu Anda klik tombol di bawah, sistem Shoecare Manokwari langsung mengirim notifikasi instan ke dashboard admin toko agar kurir atau staf kami segera memproses sepatu Anda.
+              Begitu Anda klik tombol di bawah, sistem Shoecare Manokwari langsung mengirim notifikasi instan ke dashboard admin toko agar tim staf kami segera memproses sepatu Anda.
             </span>
           </div>
 

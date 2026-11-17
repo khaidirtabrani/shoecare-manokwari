@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { CustomerOrder, OrderStatus } from '../types';
-import { formatRupiah } from '../utils/storage';
+import { formatRupiah, buildWhatsAppCustomerConfirmUrl, getAddOnLabel } from '../utils/storage';
 import { 
   Search, 
   Clock, 
@@ -20,7 +20,9 @@ import {
   ChevronRight,
   ShieldCheck,
   Send,
-  Plus
+  Plus,
+  Trash2,
+  CreditCard
 } from 'lucide-react';
 
 interface OrderTrackerProps {
@@ -29,8 +31,11 @@ interface OrderTrackerProps {
   onSelectOrderToTrack?: (orderId: string) => void;
   isAdminMode?: boolean;
   onUpdateOrderStatus?: (orderId: string, status: OrderStatus) => void;
+  onUpdatePaymentStatus?: (orderId: string, status: 'belum_bayar' | 'sudah_bayar') => void;
   onUpdateAdminNote?: (orderId: string, note: string) => void;
   onViewInvoice?: (order: CustomerOrder) => void;
+  onEditCustomer?: (order: CustomerOrder) => void;
+  onDeleteOrder?: (order: CustomerOrder) => void;
 }
 
 export const OrderTracker: React.FC<OrderTrackerProps> = ({
@@ -39,8 +44,11 @@ export const OrderTracker: React.FC<OrderTrackerProps> = ({
   onSelectOrderToTrack,
   isAdminMode = false,
   onUpdateOrderStatus,
+  onUpdatePaymentStatus,
   onUpdateAdminNote,
-  onViewInvoice
+  onViewInvoice,
+  onEditCustomer,
+  onDeleteOrder
 }) => {
   const [searchQuery, setSearchQuery] = useState(initialSearchId);
   const [selectedOrder, setSelectedOrder] = useState<CustomerOrder | null>(null);
@@ -174,21 +182,7 @@ export const OrderTracker: React.FC<OrderTrackerProps> = ({
   });
 
   const generateWhatsAppCustomerUrl = (order: CustomerOrder) => {
-    let cleanPhone = order.customerPhone.replace(/[^0-9]/g, '');
-    if (cleanPhone.startsWith('0')) {
-      cleanPhone = '62' + cleanPhone.slice(1);
-    }
-    const message = encodeURIComponent(
-      `Halo Kak *${order.customerName}*,\n\n` +
-      `Update terkini untuk pencucian sepatu Anda di *SipSepatu Care Studio*:\n` +
-      `• No. Resi: *${order.id}*\n` +
-      `• Layanan: ${order.serviceName} (${order.pairCount} pasang)\n` +
-      `• Status Saat Ini: *${getStatusBadge(order.status).label.toUpperCase()}*\n` +
-      (order.adminNotes ? `• Catatan Studio: _${order.adminNotes}_\n` : '') +
-      `• Total Biaya: ${formatRupiah(order.totalPrice)}\n\n` +
-      `Terima kasih telah mempercayakan perawatan sepatu Anda kepada kami! 🙌`
-    );
-    return `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${message}`;
+    return buildWhatsAppCustomerConfirmUrl(order);
   };
 
   return (
@@ -375,6 +369,32 @@ export const OrderTracker: React.FC<OrderTrackerProps> = ({
                   <span>Lihat Nota</span>
                 </button>
               )}
+
+              {/* Edit Customer Button (Admin Mode) */}
+              {isAdminMode && onEditCustomer && (
+                <button
+                  type="button"
+                  onClick={() => onEditCustomer(selectedOrder)}
+                  className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-semibold border border-amber-200 transition-colors cursor-pointer"
+                  title="Edit Data Pelanggan & Sepatu"
+                >
+                  <Edit3 className="w-4 h-4 text-amber-600" />
+                  <span>Edit Pelanggan</span>
+                </button>
+              )}
+
+              {/* Delete Order Button (Admin Mode) */}
+              {isAdminMode && onDeleteOrder && (
+                <button
+                  type="button"
+                  onClick={() => onDeleteOrder(selectedOrder)}
+                  className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold border border-rose-200 transition-colors cursor-pointer"
+                  title="Hapus Pesanan Ini"
+                >
+                  <Trash2 className="w-4 h-4 text-rose-600" />
+                  <span>Hapus</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -460,18 +480,6 @@ export const OrderTracker: React.FC<OrderTrackerProps> = ({
 
                   <button
                     type="button"
-                    onClick={() => handleStatusChange('dijemput')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                      selectedOrder.status === 'dijemput'
-                        ? 'bg-blue-500 text-white shadow-md ring-2 ring-white/50'
-                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                    }`}
-                  >
-                    2. Diterima Toko / Dijemput
-                  </button>
-
-                  <button
-                    type="button"
                     onClick={() => handleStatusChange('dalam_proses')}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       selectedOrder.status === 'dalam_proses'
@@ -479,7 +487,7 @@ export const OrderTracker: React.FC<OrderTrackerProps> = ({
                         : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                     }`}
                   >
-                    3. Sedang Dicuci & Treatment
+                    2. Sedang Dicuci & Treatment
                   </button>
 
                   <button
@@ -491,7 +499,7 @@ export const OrderTracker: React.FC<OrderTrackerProps> = ({
                         : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                     }`}
                   >
-                    4. Siap Diambil / Diantar
+                    3. Siap Diambil
                   </button>
 
                   <button
@@ -503,12 +511,16 @@ export const OrderTracker: React.FC<OrderTrackerProps> = ({
                         : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                     }`}
                   >
-                    5. Selesai (Lunas)
+                    4. Selesai (Lunas)
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => handleStatusChange('dibatalkan')}
+                    onClick={() => {
+                      if (window.confirm(`Apakah pesanan #${selectedOrder.id} (${selectedOrder.customerName}) mau dibatalkan? Data akan dihilangkan dari Daftar Manifest Pesanan Masuk dan statusnya tercatat sebagai Dibatalkan di Laporan.`)) {
+                        handleStatusChange('dibatalkan');
+                      }
+                    }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       selectedOrder.status === 'dibatalkan'
                         ? 'bg-rose-600 text-white shadow-md ring-2 ring-white/50'
@@ -606,44 +618,100 @@ export const OrderTracker: React.FC<OrderTrackerProps> = ({
                   </div>
                   {selectedOrder.selectedAddOns.length > 0 && (
                     <div className="flex justify-between text-slate-600 border-t border-slate-200/60 pt-1.5">
-                      <span>Add-on: {selectedOrder.selectedAddOns.join(', ')}</span>
+                      <span>Add-on: {selectedOrder.selectedAddOns.map(getAddOnLabel).join(', ')}</span>
                       <span className="font-semibold">+{formatRupiah(selectedOrder.addOnsTotal)}</span>
                     </div>
                   )}
-                  {selectedOrder.deliveryFee > 0 && (
-                    <div className="flex justify-between text-slate-600">
-                      <span>
-                        Ongkir Kurir Maxim ({selectedOrder.maximVehicle === 'mobil' ? 'Mobil' : 'Motor'}{selectedOrder.maximTripType === 'pp' ? ' PP' : ''}):
-                      </span>
-                      <span className="font-semibold">+{formatRupiah(selectedOrder.deliveryFee)}</span>
+                  {selectedOrder.discount && selectedOrder.discount > 0 ? (
+                    <div className="flex justify-between text-amber-700 border-t border-slate-200/60 pt-1.5 font-bold">
+                      <span>Diskon Prioritas (VIP):</span>
+                      <span>-{formatRupiah(selectedOrder.discount)}</span>
                     </div>
-                  )}
+                  ) : null}
                   <div className="flex justify-between items-center pt-2 border-t border-slate-200 text-sm font-extrabold text-slate-900">
                     <span>Total Pembayaran:</span>
                     <span className="text-emerald-700">{formatRupiah(selectedOrder.totalPrice)}</span>
+                  </div>
+
+                  {/* Status Bayar Display & Admin Quick Action */}
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-200/80">
+                    <span className="text-xs font-bold text-slate-600 flex items-center space-x-1">
+                      <CreditCard className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Status Bayar:</span>
+                    </span>
+                    <div className="flex items-center space-x-2">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${
+                        selectedOrder.paymentStatus === 'sudah_bayar'
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                          : 'bg-rose-100 text-rose-800 border border-rose-300'
+                      }`}>
+                        {selectedOrder.paymentStatus === 'sudah_bayar' ? 'LUNAS' : 'BELUM BAYAR'}
+                      </span>
+
+                      {isAdminMode && onUpdatePaymentStatus && (
+                        <div className="flex bg-slate-200 p-0.5 rounded-lg shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => onUpdatePaymentStatus(selectedOrder.id, 'belum_bayar')}
+                            className={`px-2 py-0.5 rounded text-[9px] font-bold transition-all cursor-pointer ${
+                              selectedOrder.paymentStatus === 'belum_bayar'
+                                ? 'bg-rose-500 text-white shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            Belum
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onUpdatePaymentStatus(selectedOrder.id, 'sudah_bayar')}
+                            className={`px-2 py-0.5 rounded text-[9px] font-bold transition-all cursor-pointer ${
+                              selectedOrder.paymentStatus === 'sudah_bayar'
+                                ? 'bg-emerald-600 text-white shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                          >
+                            Lunas
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
 
               <div className="space-y-2">
                 <h4 className="text-sm font-bold text-slate-900 flex items-center space-x-2">
-                  <Truck className="w-4 h-4 text-amber-600" />
-                  <span>Pengambilan & Kontak Pelanggan</span>
+                  <User className="w-4 h-4 text-emerald-600" />
+                  <span>Kontak & Data Pemesan</span>
                 </h4>
                 <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1.5">
-                  <p className="font-semibold text-slate-800">
-                    {selectedOrder.deliveryMethod === 'pickup' 
-                      ? `🛵 Antar-Jemput Kurir Maxim ${selectedOrder.maximVehicle === 'mobil' ? 'Car (Mobil)' : 'Bike (Motor)'}` 
-                      : '🏬 Antar Sendiri ke Outlet'}
-                  </p>
-                  {selectedOrder.pickupZone && (
-                    <p className="text-slate-700"><span className="font-medium">Zona Wilayah:</span> {selectedOrder.pickupZone}</p>
-                  )}
-                  {selectedOrder.pickupAddress && (
-                    <p className="text-slate-600"><span className="font-medium">Alamat:</span> {selectedOrder.pickupAddress}</p>
-                  )}
-                  {selectedOrder.pickupNotes && (
-                    <p className="text-slate-500 italic"><span className="font-medium">Catatan Lokasi:</span> {selectedOrder.pickupNotes}</p>
+                  <p className="font-semibold text-slate-900">{selectedOrder.customerName}</p>
+                  <p className="text-slate-600 font-mono">{selectedOrder.customerPhone}</p>
+                  {selectedOrder.deliveryMethod === 'pickup' && selectedOrder.pickupAddress ? (
+                    <div className="pt-2 border-t border-slate-200/80 space-y-1 text-slate-700">
+                      <div className="flex items-center space-x-1.5 text-emerald-700 font-bold">
+                        <span>🛵 Layanan Antar-Jemput Kurir</span>
+                        {selectedOrder.pickupZone && (
+                          <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 rounded font-normal">
+                            {selectedOrder.pickupZone}
+                          </span>
+                        )}
+                      </div>
+                      <p><span className="font-medium text-slate-500">Alamat:</span> {selectedOrder.pickupAddress}</p>
+                      {selectedOrder.pickupBenchmark && (
+                        <p className="text-slate-500 italic"><span className="font-medium not-italic text-slate-500">Patokan:</span> {selectedOrder.pickupBenchmark}</p>
+                      )}
+                      {selectedOrder.pickupTimeSlot && (
+                        <p className="text-[11px] text-slate-600"><span className="font-medium text-slate-500">Waktu Jemput:</span> {selectedOrder.pickupTimeSlot.toUpperCase()}</p>
+                      )}
+                      {selectedOrder.deliveryFee && selectedOrder.deliveryFee > 0 ? (
+                        <p className="text-emerald-700 font-semibold text-[11px]">Ongkir: {formatRupiah(selectedOrder.deliveryFee)}</p>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="pt-1.5 border-t border-slate-200/80 text-slate-500 text-[11px]">
+                      <span>🏬 Metode: Drop-off langsung di workshop Shoecare Manokwari</span>
+                    </div>
                   )}
                 </div>
               </div>
